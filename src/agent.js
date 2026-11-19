@@ -102,17 +102,17 @@ async function requestResponse(config, input, options, fetcher) {
   return result;
 }
 
-export function createAgent(book, withWorkbook, readConfig, fetcher = fetch) {
-  async function execute(session, ctx, call) {
+export function createAgent(readConfig, fetcher = fetch) {
+  async function execute(book, session, ctx, call) {
     const args = readArguments(call);
     ctx.action = call.name;
     if (call.name === 'list_requests') {
       session.draft = null;
-      return withWorkbook(() => book.list(ctx, args.status));
+      return book.list(ctx, args.status);
     }
     if (call.name === 'find_request') {
       session.draft = null;
-      return withWorkbook(() => book.find(ctx, args.id));
+      return book.find(ctx, args.id);
     }
     const draft = { name: call.name, args };
     if (call.name === 'create_request') {
@@ -123,7 +123,7 @@ export function createAgent(book, withWorkbook, readConfig, fetcher = fetch) {
         return { kind: 'clarification', message };
       }
       session.draft = null;
-      return withWorkbook(() => book.add(ctx, args.client, args.problem));
+      return book.add(ctx, args.client, args.problem);
     }
 
     if ((!args.id && !args.client) || !args.status) {
@@ -131,13 +131,13 @@ export function createAgent(book, withWorkbook, readConfig, fetcher = fetch) {
       return { kind: 'clarification', message: !args.id && !args.client ?
         'Укажите ID или имя клиента.' : 'Какой статус установить: «Новый», «В работе» или «Готово»?' };
     }
-    const result = await withWorkbook(() => book.prepare(ctx, args));
+    const result = await book.prepare(ctx, args);
     session.draft = result.kind === 'ambiguous' ? draft : null;
     if (result.confirmation) session.confirmations.set(result.confirmation.id, { operation: result.confirmation });
     return result;
   }
 
-  return async (session, ctx, message) => {
+  return async (book, session, ctx, message) => {
     const config = await readConfig();
     const state = session.draft ? {
       role: 'developer',
@@ -151,7 +151,7 @@ export function createAgent(book, withWorkbook, readConfig, fetcher = fetch) {
     let result = { kind: 'reply', message: responseText(first) || 'Уточните, что нужно сделать с заявкой.' };
     if (calls.length) {
       try {
-        result = await execute(session, ctx, calls[0]);
+        result = await execute(book, session, ctx, calls[0]);
       } catch (error) {
         result = { kind: 'error', message: error.message };
       }

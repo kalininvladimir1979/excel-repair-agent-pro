@@ -1,9 +1,8 @@
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { filename } from './workbook.js';
 
 const exec = promisify(execFile);
 
@@ -41,15 +40,14 @@ async function showOnDesktop(file, reveal) {
   throw new Error('На этой системе открытие из браузера не поддерживается.');
 }
 
-export function workbookDesktopAction(directory, reveal) {
-  const file = resolve(directory, filename);
+export function workbookDesktopAction(file, reveal) {
   return async (_req, res) => {
     const info = await stat(file).catch(error => {
       if (error.code === 'ENOENT') return null;
       throw error;
     });
     if (!info?.isFile()) {
-      return res.status(404).json({ message: 'Рабочая книга requests.xlsx отсутствует. Сначала создайте её.' });
+      return res.status(404).json({ message: 'Рабочая книга отсутствует. Проверьте её путь в админке.' });
     }
 
     try {

@@ -193,6 +193,14 @@ function appendTrace(reply, result) {
 }
 
 let busy = false;
+let workbookVersion;
+let workbookRefreshPending = false;
+const workbookUpdates = typeof BroadcastChannel === 'function' ? new BroadcastChannel('repair-workbook') : null;
+workbookUpdates?.addEventListener('message', () => {
+  if (page !== 'workspace') return;
+  workbookRefreshPending = true;
+  void refresh();
+});
 let dictationPhase = 'idle';
 let sendingDictation = false;
 let keySource;
@@ -223,14 +231,26 @@ function setBusy(value, caption = '') {
   syncSendButton();
   $('refresh').disabled = value;
   $('chat-state').textContent = caption || (keySource === 'none' ? 'Нужен ключ OpenAI' : '');
+  if (!value && workbookRefreshPending) queueMicrotask(refresh);
+}
+
+function showWorkbook(workbook) {
+  if (!workbook) return;
+  workbookVersion = workbook.version;
+  $('workbook-name').textContent = workbook.filename;
+  $('workbook-name').title = workbook.path;
+  $('workbook-path').value = workbook.path;
+  $('mcp-workbook').textContent = workbook.path;
 }
 
 async function refresh() {
   if (busy) return;
+  workbookRefreshPending = false;
   setBusy(true);
   hideTable('Читаю рабочую книгу…');
   try {
     const result = await api('/api/requests');
+    showWorkbook(result.workbook);
     addLog(result.operation);
     if (result.table) renderTable(result.table);
     else hideTable(result.message || 'Не удалось прочитать книгу.', true);
@@ -348,8 +368,8 @@ $('chat-form').addEventListener('submit', async event => {
   }
   const message = $('message').value.trim();
   if (!message || dictationPhase !== 'idle') return;
-  if (unsent?.message !== message) {
-    unsent = { message, submissionId: crypto.randomUUID() };
+  if (unsent?.message !== message || unsent.workbookVersion !== workbookVersion) {
+    unsent = { message, submissionId: crypto.randomUUID(), workbookVersion };
     addEntry(message, true);
   }
   setBusy(true, 'Обрабатываю команду…');
@@ -358,6 +378,7 @@ $('chat-form').addEventListener('submit', async event => {
   try {
     const result = await api('/api/chat', 'POST', unsent).finally(() => thinking.remove());
     unsent = null;
+    if (result.workbookChanged) workbookRefreshPending = true;
     renderReply(result);
     const triedWriting = result.operation?.log.some(entry => entry.name === 'write_range');
     if (result.kind === 'error' && !triedWriting && !$('message').value) $('message').value = message;
@@ -437,6 +458,28 @@ $('model-form').addEventListener('submit', event => {
 });
 $('clear-model').addEventListener('click', () => saveSetting('model', '', 'Восстановлена модель из окружения или значение по умолчанию.'));
 
+$('workbook-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = $('workbook-path');
+  const button = event.currentTarget.querySelector('button[type=submit]');
+  if (button.disabled) return;
+  button.disabled = true;
+  input.readOnly = true;
+  resultLabel('workbook-result', 'Проверяю книгу через MCP…');
+  try {
+    const result = await api('/api/settings/workbook', 'PUT', { path: input.value });
+    if (!result.workbook) throw new Error(result.message || 'Не удалось подключить книгу.');
+    showWorkbook(result.workbook);
+    workbookUpdates?.postMessage('changed');
+    resultLabel('workbook-result', `Подключена книга ${result.workbook.filename}.`);
+  } catch (error) {
+    resultLabel('workbook-result', error.message, true);
+  } finally {
+    input.readOnly = false;
+    button.disabled = false;
+  }
+});
+
 $('diagnose').addEventListener('click', async () => {
   $('diagnose').disabled = true;
   $('diagnostic-tools').replaceChildren();
@@ -462,6 +505,7 @@ async function loadSettings() {
     if (config.message) throw new Error(config.message);
     showKey(config.keySource);
     showModel(config);
+    if (page !== 'workspace') showWorkbook(config.workbook);
     $('mcp-version').textContent = config.version;
     if (page === 'workspace' && config.keySource === 'none') $('chat-state').textContent = 'Нужен ключ OpenAI';
   } catch (error) {

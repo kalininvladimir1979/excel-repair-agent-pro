@@ -26,7 +26,7 @@
           <h1>Заявки <span>на ремонт</span></h1>
           <p>Добавляйте заявки и меняйте их статус через чат. Реестр хранится в локальной книге Excel.</p>
           <div class="workbook-tag">
-            <span data-icon="file"></span><span>requests.xlsx</span>
+            <span data-icon="file"></span><span id="workbook-name">requests.xlsx</span>
             <div class="workbook-actions" role="group" aria-label="Действия с рабочей книгой">
               <button type="button" class="secondary workbook-action" data-workbook-action="open" title="Открыть рабочую книгу" aria-label="Открыть рабочую книгу"><span data-icon="eye"></span></button>
               <button type="button" class="secondary workbook-action" data-workbook-action="reveal" title="Показать рабочую книгу в папке" aria-label="Показать рабочую книгу в папке"><span data-icon="folder"></span></button>
@@ -101,7 +101,7 @@
 
     <section id="admin" class="settings-page" hidden>
       <h1>Настройки мастерской</h1>
-      <p class="page-description">Подключение OpenAI для рабочего чата.</p>
+      <p class="page-description">Подключения OpenAI и рабочей книги Excel.</p>
       <section class="panel settings-panel" aria-labelledby="key-title">
         <div class="panel-head"><h2 id="key-title"><span class="panel-icon" data-icon="key"></span> Ключ OpenAI</h2><span id="key-state" class="panel-note" role="status"></span></div>
         <form id="key-form" class="settings-form">
@@ -110,6 +110,16 @@
           <p class="muted">Ключ хранится на этом компьютере в серверном файле настроек. Для замены введите новый ключ.</p>
           <div class="settings-actions"><button class="primary" type="submit">Сохранить ключ</button><button type="button" id="clear-key" class="secondary">Убрать сохранённый ключ</button></div>
           <p id="key-result" class="form-result" role="status"></p>
+        </form>
+      </section>
+      <section class="panel settings-panel" aria-labelledby="workbook-title">
+        <div class="panel-head"><h2 id="workbook-title"><span class="panel-icon" data-icon="file"></span> Рабочая книга Excel</h2></div>
+        <form id="workbook-form" class="settings-form">
+          <label for="workbook-path">Полный путь к файлу .xlsx</label>
+          <input id="workbook-path" type="text" maxlength="4096" autocomplete="off" spellcheck="false" aria-describedby="workbook-help" required>
+          <p id="workbook-help" class="muted">Укажите путь вместе с именем файла. Приложение проверит лист «Заявки» через MCP перед переключением.</p>
+          <div class="settings-actions"><button class="primary" type="submit">Проверить и подключить</button></div>
+          <p id="workbook-result" class="form-result" role="status"></p>
         </form>
       </section>
     </section>
@@ -131,7 +141,7 @@
         <section class="panel settings-panel" aria-labelledby="mcp-title">
           <div class="panel-head"><h2 id="mcp-title"><span class="panel-icon" data-icon="terminal"></span> Excel MCP</h2></div>
           <div class="settings-form">
-            <dl class="facts"><div><dt>Версия</dt><dd id="mcp-version">2.3.2</dd></div><div><dt>Транспорт</dt><dd>stdio</dd></div><div><dt>Рабочая книга</dt><dd>data/requests.xlsx</dd></div><div><dt>Лист</dt><dd>Заявки</dd></div></dl>
+            <dl class="facts"><div><dt>Версия</dt><dd id="mcp-version">2.3.2</dd></div><div><dt>Транспорт</dt><dd>stdio</dd></div><div><dt>Рабочая книга</dt><dd id="mcp-workbook">data/requests.xlsx</dd></div><div><dt>Лист</dt><dd>Заявки</dd></div></dl>
             <button class="secondary" id="diagnose" type="button"><span data-icon="refresh"></span> Проверить подключение</button>
             <p id="diagnostic-result" class="form-result" role="status"></p>
             <div id="diagnostic-tools"></div>

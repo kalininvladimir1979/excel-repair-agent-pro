@@ -31,6 +31,7 @@ export function createSettings(directory, env = process.env) {
     const key = saved.key || env.OPENAI_API_KEY?.trim() || '';
     return {
       key,
+      workbookPath: saved.workbookPath,
       keySource: saved.key ? 'admin' : key ? 'env' : 'none',
       model: saved.model || env.OPENAI_MODEL?.trim() || defaultModel,
       modelSource: saved.model ? 'dev' : env.OPENAI_MODEL?.trim() ? 'env' : 'default',

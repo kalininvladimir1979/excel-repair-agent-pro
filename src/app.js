@@ -1,7 +1,9 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { mkdir } from 'node:fs/promises';
+import { access, mkdir, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { createAgent } from './agent.js';
 import { createMcp, mcpVersion, serialQueue } from './mcp.js';
 import { createSettings, validKey, validModel } from './settings.js';
@@ -24,9 +26,17 @@ export async function createApp({
   const app = express();
   app.disable('x-powered-by');
   const withWorkbook = serialQueue();
-  const book = createWorkbook(mcp);
   const settings = createSettings(directory, env);
-  const agent = createAgent(book, withWorkbook, settings.resolve, fetcher);
+  const defaultBookPath = resolve(directory, filename);
+  const configuredBookPath = (await settings.resolve()).workbookPath;
+  function connectBook(path, transport = createMcp(dirname(path))) {
+    return { path, transport, book: createWorkbook(transport, basename(path)), version: randomUUID() };
+  }
+  let active = configuredBookPath && configuredBookPath !== defaultBookPath ?
+    connectBook(configuredBookPath) : connectBook(defaultBookPath, mcp);
+  const workbookInfo = () => ({ path: active.path, filename: basename(active.path), version: active.version });
+  const changedBook = 'Рабочая книга изменилась. Проверьте реестр и повторите команду.';
+  const agent = createAgent(settings.resolve, fetcher);
   const sessions = new Map();
 
   const dictationPath = /^\/api\/dictation\/?$/i;
@@ -54,7 +64,7 @@ export async function createApp({
     let session = token && sessions.get(token);
     if (!session) {
       const id = randomUUID();
-      session = { history: [], draft: null, chat: new Map(), confirmations: new Map(), queue: serialQueue() };
+      session = { history: [], draft: null, chat: new Map(), confirmations: new Map() };
       sessions.set(id, session);
       res.cookie(cookie, id, { httpOnly: true, sameSite: 'strict', path: '/' });
     }
@@ -71,31 +81,41 @@ export async function createApp({
     }
   }
 
-  app.post('/api/workbook/open', workbookDesktopAction(directory, false));
-  app.post('/api/workbook/reveal', workbookDesktopAction(directory, true));
+  app.post('/api/workbook/open', (req, res) => workbookDesktopAction(active.path, false)(req, res));
+  app.post('/api/workbook/reveal', (req, res) => workbookDesktopAction(active.path, true)(req, res));
 
   app.get('/api/requests', async (_req, res) => {
     const ctx = context('Обновление таблицы');
-    const result = await operation(ctx, () => withWorkbook(async () => ({ table: await book.readAll(ctx) })));
+    const result = await withWorkbook(async () => ({
+      ...await operation(ctx, async () => ({ table: await active.book.readAll(ctx) })),
+      workbook: workbookInfo(),
+    }));
     res.status(result.kind === 'error' ? 503 : 200).json(result);
   });
 
   app.post('/api/chat', async (req, res) => {
-    const { message, submissionId } = req.body ?? {};
+    const { message, submissionId, workbookVersion } = req.body ?? {};
     if (typeof message !== 'string' || !message.trim() || message.length > 4000 ||
         typeof submissionId !== 'string' || !uuid.test(submissionId)) {
       return res.status(400).json({ message: 'Введите сообщение до 4000 символов и укажите UUID отправки.' });
     }
     const text = message.trim();
     const session = req.session;
+    const version = workbookVersion ?? active.version;
     const previous = session.chat.get(submissionId);
+    if (version !== active.version || (previous && previous.version !== version)) {
+      return res.status(409).json({ kind: 'error', message: changedBook, workbookChanged: true });
+    }
     if (previous && previous.message !== text) {
       return res.status(409).json({ message: 'Этот идентификатор уже использован для другого сообщения.' });
     }
     if (!previous) {
       const ctx = context(text, submissionId);
-      const pending = session.queue(() => operation(ctx, () => agent(session, ctx, text)));
-      session.chat.set(submissionId, { message: text, pending });
+      const pending = withWorkbook(() => operation(ctx, () => {
+        if (version !== active.version) return { kind: 'error', message: changedBook, workbookChanged: true };
+        return agent(active.book, session, ctx, text);
+      }));
+      session.chat.set(submissionId, { message: text, pending, version });
     }
     res.json(await session.chat.get(submissionId).pending);
   });
@@ -113,11 +133,14 @@ export async function createApp({
     }
     if (!confirmation.pending) {
       confirmation.action = action;
+      const version = active.version;
       const ctx = context(`Заявка №${confirmation.operation.record.id} · ${action === 'confirm' ? 'подтверждение' : 'отмена'}`, id);
       ctx.action = action === 'confirm' ? 'confirm_status_change' : 'cancel_status_change';
-      confirmation.pending = operation(ctx, () => action === 'cancel' ?
-        { kind: 'cancelled', message: 'Изменение статуса отменено.' } :
-        withWorkbook(() => book.confirm(ctx, confirmation.operation)));
+      confirmation.pending = withWorkbook(() => operation(ctx, () => {
+        if (version !== active.version) return { kind: 'expired', message: changedBook };
+        return action === 'cancel' ? { kind: 'cancelled', message: 'Изменение статуса отменено.' } :
+          active.book.confirm(ctx, confirmation.operation);
+      }));
     }
     res.json(await confirmation.pending);
   });
@@ -126,7 +149,58 @@ export async function createApp({
 
   app.get('/api/settings', async (_req, res) => {
     const { keySource, model, modelSource } = await settings.resolve();
-    res.json({ keySource, model, modelSource, version: mcpVersion, filename, sheet });
+    const workbook = workbookInfo();
+    res.json({ keySource, model, modelSource, version: mcpVersion, filename: workbook.filename, workbook, sheet });
+  });
+
+  app.put('/api/settings/workbook', async (req, res) => {
+    const supplied = req.body?.path;
+    const path = typeof supplied === 'string' ? supplied.trim() : '';
+    if (path.includes('\0') || !isAbsolute(path) || extname(path).toLowerCase() !== '.xlsx') {
+      return res.status(400).json({ message: 'Укажите полный путь к файлу .xlsx.' });
+    }
+
+    const result = await withWorkbook(async () => {
+      let verifiedPath;
+      try {
+        verifiedPath = await realpath(path);
+        if (extname(verifiedPath).toLowerCase() !== '.xlsx' || !(await stat(verifiedPath)).isFile()) {
+          return { status: 400, message: 'По указанному пути должен находиться файл .xlsx.' };
+        }
+        await access(verifiedPath, constants.R_OK | constants.W_OK);
+        await access(dirname(verifiedPath), constants.W_OK);
+      } catch (error) {
+        return error.code === 'ENOENT' ? { status: 404, message: 'Файл по указанному пути не найден.' } :
+          { status: 400, message: 'Нет доступа к чтению и записи книги или её папки.' };
+      }
+
+      const previous = active;
+      const candidate = verifiedPath === previous.path ? previous : connectBook(verifiedPath);
+      try {
+        await candidate.book.readAll(context('Проверка рабочей книги'));
+      } catch (error) {
+        if (candidate !== previous) await candidate.transport.close();
+        return { status: 422, message: `Книга не подключена. ${error.message}` };
+      }
+      if (candidate !== previous) {
+        try {
+          await settings.save({ workbookPath: verifiedPath });
+        } catch (error) {
+          await candidate.transport.close();
+          throw error;
+        }
+        active = candidate;
+        for (const session of sessions.values()) {
+          session.history = [];
+          session.draft = null;
+          session.confirmations.clear();
+        }
+        await previous.transport.close();
+      }
+      return { status: 200, workbook: workbookInfo() };
+    });
+    const { status, ...body } = result;
+    res.status(status).json(body);
   });
 
   app.put('/api/settings/key', async (req, res) => {
@@ -148,11 +222,11 @@ export async function createApp({
   app.post('/api/diagnostics/mcp', async (_req, res) => {
     const ctx = context('Диагностика Excel MCP');
     const result = await operation(ctx, () => withWorkbook(async () => {
-      const tools = await mcp.catalog();
+      const tools = await active.transport.catalog();
       if (!['read_range', 'write_range', 'create_workbook'].every(name => tools.includes(name))) {
         throw new Error('В каталоге MCP отсутствуют обязательные инструменты.');
       }
-      const table = await book.readAll(ctx);
+      const table = await active.book.readAll(ctx);
       return { tools, count: table.length };
     }));
     res.status(result.kind === 'error' ? 503 : 200).json(result);
@@ -171,5 +245,5 @@ export async function createApp({
     res.status(status).json({ kind: 'error', message });
   });
 
-  return { app, close: () => withWorkbook(() => mcp.close()) };
+  return { app, close: () => withWorkbook(() => active.transport.close()) };
 }

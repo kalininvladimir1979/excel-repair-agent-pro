@@ -39,8 +39,8 @@ function pageRange(value) {
   return { first, last };
 }
 
-export function createWorkbook(mcp) {
-  const base = { path: filename, sheet };
+export function createWorkbook(mcp, workbookFilename = filename) {
+  const base = { path: workbookFilename, sheet };
   const read = (ctx, range) => mcp.call(ctx, 'read_range', {
     ...base, mode: 'formulas', ...(range && { range }),
   });
