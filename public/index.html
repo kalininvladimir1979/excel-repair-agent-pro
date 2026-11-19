@@ -25,7 +25,14 @@
         <div class="hero-copy">
           <h1>Заявки <span>на ремонт</span></h1>
           <p>Добавляйте заявки и меняйте их статус через чат. Реестр хранится в локальной книге Excel.</p>
-          <div class="workbook-tag"><span data-icon="file"></span> requests.xlsx</div>
+          <div class="workbook-tag">
+            <span data-icon="file"></span><span>requests.xlsx</span>
+            <div class="workbook-actions" role="group" aria-label="Действия с рабочей книгой">
+              <button type="button" class="secondary workbook-action" data-workbook-action="open" title="Открыть рабочую книгу" aria-label="Открыть рабочую книгу"><span data-icon="eye"></span></button>
+              <button type="button" class="secondary workbook-action" data-workbook-action="reveal" title="Показать рабочую книгу в папке" aria-label="Показать рабочую книгу в папке"><span data-icon="folder"></span></button>
+            </div>
+          </div>
+          <p id="workbook-status" class="workbook-status" role="status"></p>
         </div>
         <div class="hero-photo"><img src="/bench.webp" alt="Мастер ремонтирует ноутбук" width="1200" height="800"></div>
       </div>
@@ -51,8 +58,21 @@
             <form id="chat-form" class="composer">
               <label for="message" class="visually-hidden">Сообщение агенту</label>
               <textarea id="message" rows="2" maxlength="4000" placeholder="Напишите команду…" required></textarea>
+              <div class="voice-controls" data-phase="idle">
+                <span id="dictation-timer" class="voice-timer" aria-hidden="true" hidden>00:00</span>
+                <span id="dictation-meter" class="voice-meter" aria-hidden="true" hidden>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </span>
+                <button type="button" id="dictate" class="secondary dictate" aria-label="Начать диктовку" aria-pressed="false" title="Диктовка через OpenAI">
+                  <span data-icon="microphone"></span><span data-icon="stop"></span>
+                </button>
+              </div>
               <button type="submit" class="primary send" id="send" aria-label="Отправить сообщение"><span data-icon="arrow"></span></button>
             </form>
+            <div class="voice-feedback">
+              <p id="dictation-status" role="status"></p>
+              <button id="dictation-cancel" type="button" form="chat-form" hidden>Отменить диктовку</button>
+            </div>
             <div class="composer-meta"><span>Enter — отправить · Shift + Enter — новая строка</span><a id="key-link" href="/adminvk" hidden>Подключить OpenAI</a></div>
           </div>
         </section>

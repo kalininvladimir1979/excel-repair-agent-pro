@@ -142,6 +142,7 @@ test('Обязательные сценарии через HTTP и реальн�
     const [a, b] = await Promise.all([send(anna, id), send(anna, id)]);
     assert.equal(a.kind, 'created', a.message);
     assert.deepEqual(a, b);
+    assert.equal(a.operation.action, 'create_request');
     assert.equal(a.record.id, 104);
     assert.equal(a.record.status, 'Новый');
     assert.deepEqual(actions(a), ['read_range', 'write_range', 'read_range']);
@@ -154,12 +155,15 @@ test('Обязательные сценарии через HTTP и реальн�
   await t.test('Подтверждение привязано к сессии и пишет только D5 один раз', async () => {
     const card = await send(moveAnna);
     assert.equal(card.kind, 'confirmation', card.message);
+    assert.equal(card.operation.action, 'prepare_status_change');
     assert.equal(card.confirmation.record.status, 'Новый');
     assert.deepEqual(actions(card), ['read_range']);
     assert.equal((await confirm(card, 'confirm', browser())).httpStatus, 404);
     const [a, b] = await Promise.all([confirm(card), confirm(card)]);
     assert.equal(a.kind, 'updated', a.message);
     assert.deepEqual(a, b);
+    assert.equal(a.operation.action, 'confirm_status_change');
+    assert.notEqual(a.operation.id, card.operation.id);
     assert.deepEqual(a.operation.log[1].arguments, { ...excelArgs, at: 'D5', rows: [['В работе']] });
     assert.equal((await external('read_range', { range: 'D5' })).values[0][0], 'В работе');
   });
@@ -174,6 +178,7 @@ test('Обязательные сценарии через HTTP и реальн�
     assert.deepEqual(actions(absent), ['read_range']);
     const draft = await send(dmitry);
     assert.equal(draft.kind, 'clarification', draft.message);
+    assert.equal(draft.operation.action, 'create_request');
     assert.deepEqual(actions(draft), []);
     assert.equal((await api('/api/requests')).table.length, 4);
     const end = await send(problem);

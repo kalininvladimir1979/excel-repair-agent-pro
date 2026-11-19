@@ -5,7 +5,9 @@ import { mkdir } from 'node:fs/promises';
 import { createAgent } from './agent.js';
 import { createMcp, mcpVersion, serialQueue } from './mcp.js';
 import { createSettings, validKey, validModel } from './settings.js';
+import { acceptsDictation, createTranscription } from './transcription.js';
 import { createWorkbook, filename, sheet } from './workbook.js';
+import { workbookDesktopAction } from './workbook-desktop.js';
 
 const root = new URL('../', import.meta.url);
 const staticPath = fileURLToPath(new URL('public/', root));
@@ -27,13 +29,15 @@ export async function createApp({
   const agent = createAgent(book, withWorkbook, settings.resolve, fetcher);
   const sessions = new Map();
 
+  const dictationPath = /^\/api\/dictation\/?$/i;
   app.use((req, res, next) => {
     const host = req.get('host') ?? '';
     if (!localHost.test(host)) return res.status(403).json({ message: 'Приложение доступно через локальный адрес.' });
+    const isDictation = req.method === 'POST' && dictationPath.test(req.path);
     if (!['GET', 'HEAD'].includes(req.method) &&
         ((req.get('origin') && req.get('origin') !== `http://${host}`) ||
-         req.get('sec-fetch-site') === 'cross-site' || !req.is('application/json'))) {
-      return res.status(403).json({ message: 'Разрешены JSON-запросы с локальной страницы приложения.' });
+         req.get('sec-fetch-site') === 'cross-site' || !(isDictation ? acceptsDictation(req) : req.is('application/json')))) {
+      return res.status(403).json({ message: 'Запрос должен прийти с локальной страницы приложения в поддерживаемом формате.' });
     }
     res.set({
       'Content-Security-Policy': "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
@@ -66,6 +70,9 @@ export async function createApp({
       return { kind: 'error', message: error.message, operation: ctx };
     }
   }
+
+  app.post('/api/workbook/open', workbookDesktopAction(directory, false));
+  app.post('/api/workbook/reveal', workbookDesktopAction(directory, true));
 
   app.get('/api/requests', async (_req, res) => {
     const ctx = context('Обновление таблицы');
@@ -107,12 +114,15 @@ export async function createApp({
     if (!confirmation.pending) {
       confirmation.action = action;
       const ctx = context(`Заявка №${confirmation.operation.record.id} · ${action === 'confirm' ? 'подтверждение' : 'отмена'}`, id);
+      ctx.action = action === 'confirm' ? 'confirm_status_change' : 'cancel_status_change';
       confirmation.pending = operation(ctx, () => action === 'cancel' ?
         { kind: 'cancelled', message: 'Изменение статуса отменено.' } :
         withWorkbook(() => book.confirm(ctx, confirmation.operation)));
     }
     res.json(await confirmation.pending);
   });
+
+  app.post(dictationPath, express.raw({ type: acceptsDictation, limit: '2mb' }), createTranscription(settings.resolve, fetcher));
 
   app.get('/api/settings', async (_req, res) => {
     const { keySource, model, modelSource } = await settings.resolve();

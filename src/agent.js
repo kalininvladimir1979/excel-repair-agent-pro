@@ -100,6 +100,7 @@ async function requestResponse(config, input, options, fetcher) {
 export function createAgent(book, withWorkbook, readConfig, fetcher = fetch) {
   async function execute(session, ctx, call) {
     const args = readArguments(call);
+    ctx.action = call.name;
     if (call.name === 'list_requests') {
       session.draft = null;
       return withWorkbook(() => book.list(ctx, args.status));

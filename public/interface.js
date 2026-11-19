@@ -1,7 +1,11 @@
+import { bindVoiceDictation } from './voice-dictation.js';
+
 const $ = id => document.getElementById(id);
 const icons = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/>',
   moon: '<path d="M20.5 14.2A8.7 8.7 0 0 1 9.8 3.5a8.8 8.8 0 1 0 10.7 10.7Z"/>',
+  eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/>',
+  folder: '<path d="M3 19V5h6l2 3h10v11H3Z"/><path d="M3 11h18"/>',
   file: '<path d="M5 3h9l5 5v13H5zM14 3v6h5M8 13h8m-8 4h8"/>',
   chat: '<path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4v-4H3V5a1 1 0 0 1 1-1Z"/><path d="M7 9h10m-10 4h6"/>',
   table: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M3 14h18M9 9v11"/>',
@@ -10,6 +14,8 @@ const icons = {
   refresh: '<path d="M20 4v5h-5m5 6a8 8 0 1 1-1.1-7.6L20 9"/>',
   terminal: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="m7 9 3 3-3 3m6 0h4"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  microphone: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1m-7 8v3m-3 0h6"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/>',
   key: '<circle cx="8" cy="9" r="5"/><path d="m12 12 8 8m-2-2 2-2m-5-1 2-2"/>',
 };
 
@@ -72,6 +78,29 @@ const resultLabel = (id, text, error = false) => {
   $(id).classList.toggle('error', error);
 };
 
+const workbookActions = [...document.querySelectorAll('[data-workbook-action]')];
+let openingWorkbook = false;
+for (const button of workbookActions) {
+  button.addEventListener('click', async () => {
+    if (openingWorkbook) return;
+    openingWorkbook = true;
+    workbookActions.forEach(action => action.setAttribute('aria-disabled', 'true'));
+    const { workbookAction } = button.dataset;
+    const reveal = workbookAction === 'reveal';
+    resultLabel('workbook-status', reveal ? 'Открываю папку…' : 'Открываю рабочую книгу…');
+    try {
+      const result = await api(`/api/workbook/${workbookAction}`, 'POST', {});
+      if (!result.opened) throw new Error(result.message || 'Не удалось выполнить действие.');
+      resultLabel('workbook-status', reveal ? 'Открыта папка рабочей книги.' : 'Книга открывается в системном приложении.');
+    } catch (error) {
+      resultLabel('workbook-status', error.message, true);
+    } finally {
+      openingWorkbook = false;
+      workbookActions.forEach(action => action.removeAttribute('aria-disabled'));
+    }
+  });
+}
+
 const russianPlural = new Intl.PluralRules('ru');
 function countLabel(count) {
   const word = { one: 'заявка', few: 'заявки', many: 'заявок' }[russianPlural.select(count)] || 'заявок';
@@ -106,15 +135,27 @@ function hideTable(message, error = false) {
   resultLabel('table-empty', message, error);
 }
 
-const logged = new Set();
+const actionLabels = {
+  create_request: 'Добавление заявки',
+  prepare_status_change: 'Подготовка смены статуса',
+  confirm_status_change: 'Смена статуса после подтверждения',
+  cancel_status_change: 'Отмена смены статуса',
+  list_requests: 'Поиск заявок по статусу',
+};
+const logged = new Map();
 let logCount = 0;
 
 function addLog(operation) {
-  if (!operation?.log.length || logged.has(operation.id)) return;
-  logged.add(operation.id);
+  if (!operation?.log.length) return;
+  if (logged.has(operation.id)) return logged.get(operation.id);
   if (!logCount) $('logs').replaceChildren();
   const group = node('article', 'log-group');
-  group.append(node('header', '', operation.label));
+  const heading = node('header');
+  heading.tabIndex = -1;
+  heading.append(node('strong', '', operation.label));
+  const action = actionLabels[operation.action];
+  if (action) heading.append(node('div', 'log-action', action));
+  group.append(heading);
   for (const entry of operation.log) {
     const detail = node('details');
     detail.append(node('summary', '', `${entry.name} · ${entry.error ? 'ошибка' : 'выполнен'}`));
@@ -125,15 +166,60 @@ function addLog(operation) {
     group.append(detail);
   }
   $('logs').append(group);
+  logged.set(operation.id, group);
   logCount += operation.log.length;
   $('log-count').textContent = logCount;
+  return group;
+}
+
+function appendTrace(reply, result) {
+  const group = addLog(result.operation);
+  if (group) {
+    const link = node('button', 'trace-link', `Вызовы MCP · ${result.operation.log.length}`);
+    link.type = 'button';
+    link.addEventListener('click', () => {
+      $('journal').open = true;
+      group.querySelectorAll('details').forEach(call => { call.open = true; });
+      group.scrollIntoView({ block: 'start' });
+      group.querySelector('header').focus({ preventScroll: true });
+    });
+    reply.append(link);
+  } else if (result.kind === 'clarification' || result.kind === 'cancelled') {
+    const text = result.kind === 'clarification' ?
+      'Ожидаю уточнения. Вызовов MCP пока нет.' : 'Вызовов MCP нет.';
+    reply.append(node('p', 'trace-note', text));
+  }
 }
 
 let busy = false;
+let dictationPhase = 'idle';
+let sendingDictation = false;
 let keySource;
+const voice = page === 'workspace' ? bindVoiceDictation({
+  input: $('message'), button: $('dictate'), cancelButton: $('dictation-cancel'),
+  timer: $('dictation-timer'), meter: $('dictation-meter'), status: $('dictation-status'),
+  onPhase(phase) {
+    dictationPhase = phase;
+    if (phase === 'idle' && sendingDictation) {
+      sendingDictation = false;
+      setBusy(false);
+    } else {
+      syncSendButton();
+    }
+  },
+}) : null;
+function syncSendButton() {
+  const send = $('send');
+  const recording = dictationPhase === 'recording';
+  send.disabled = busy || (!recording && dictationPhase !== 'idle');
+  send.formNoValidate = recording;
+  const label = recording ? 'Распознать и отправить сообщение' : 'Отправить сообщение';
+  send.setAttribute('aria-label', label);
+  send.title = label;
+}
 function setBusy(value, caption = '') {
   busy = value;
-  $('send').disabled = value;
+  syncSendButton();
   $('refresh').disabled = value;
   $('chat-state').textContent = caption || (keySource === 'none' ? 'Нужен ключ OpenAI' : '');
 }
@@ -169,6 +255,17 @@ function scrollChat() {
   $('chat-feed').scrollTop = $('chat-feed').scrollHeight;
 }
 
+function showThinking() {
+  const entry = node('article', 'entry agent-entry thinking-entry');
+  entry.setAttribute('aria-hidden', 'true');
+  const dots = node('span', 'thinking-dots');
+  dots.append(node('span'), node('span'), node('span'));
+  entry.append(icon('chat', 'avatar'), dots);
+  $('chat-feed').append(entry);
+  scrollChat();
+  return entry;
+}
+
 function confirmationCard(container, confirmation) {
   const card = node('div', 'confirmation');
   card.append(node('strong', '', `№${confirmation.record.id} · ${confirmation.record.client}`),
@@ -199,7 +296,7 @@ function confirmationCard(container, confirmation) {
       feedback.textContent = result.message;
       feedback.tabIndex = -1;
       feedback.focus();
-      addLog(result.operation);
+      appendTrace(card, result);
       if (result.table) renderTable(result.table);
       if (result.kind === 'error') hideTable('Обновите таблицу, чтобы проверить состояние книги.', true);
     } catch (error) {
@@ -218,7 +315,6 @@ function confirmationCard(container, confirmation) {
 }
 
 function renderReply(result) {
-  addLog(result.operation);
   const reply = addEntry(result.message || 'Ответ приложения недоступен.', false, result.kind === 'error');
   if (result.confirmation) confirmationCard(reply, result.confirmation);
   if (result.matches?.length) {
@@ -229,6 +325,7 @@ function renderReply(result) {
     }
     reply.append(list);
   }
+  appendTrace(reply, result);
   if (result.table) renderTable(result.table);
   if (result.kind === 'error' && result.operation?.log.some(entry => entry.name === 'write_range')) {
     hideTable('Обновите таблицу, чтобы проверить состояние книги.', true);
@@ -239,16 +336,25 @@ function renderReply(result) {
 let unsent;
 $('chat-form').addEventListener('submit', async event => {
   event.preventDefault();
+  if (busy) return;
+  if (dictationPhase === 'recording' && event.submitter === $('send')) {
+    if (voice.stop(() => $('chat-form').requestSubmit())) {
+      sendingDictation = true;
+      setBusy(true, 'Распознаю речь…');
+    }
+    return;
+  }
   const message = $('message').value.trim();
-  if (!message || busy) return;
+  if (!message || dictationPhase !== 'idle') return;
   if (unsent?.message !== message) {
     unsent = { message, submissionId: crypto.randomUUID() };
     addEntry(message, true);
   }
   setBusy(true, 'Обрабатываю команду…');
+  const thinking = showThinking();
   $('message').value = '';
   try {
-    const result = await api('/api/chat', 'POST', unsent);
+    const result = await api('/api/chat', 'POST', unsent).finally(() => thinking.remove());
     unsent = null;
     renderReply(result);
     const triedWriting = result.operation?.log.some(entry => entry.name === 'write_range');
@@ -263,11 +369,12 @@ $('chat-form').addEventListener('submit', async event => {
 $('message').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
-    $('chat-form').requestSubmit();
+    if (dictationPhase === 'idle') $('chat-form').requestSubmit();
   }
 });
 document.querySelectorAll('[data-example]').forEach(button => {
   button.addEventListener('click', () => {
+    voice?.cancel();
     $('message').value = button.dataset.example;
     $('message').focus();
   });
