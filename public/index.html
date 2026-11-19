@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#21201e">
+  <title>Ремонтное бюро</title>
+  <link rel="icon" href="/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/interface.js" type="module"></script>
+</head>
+<body>
+  <a class="skip" href="#main">К содержимому</a>
+  <header class="top"><div class="shell top-inner">
+    <a class="brand" href="/"><img src="/mark.svg" width="37" height="37" alt=""><span>РЕМОНТНОЕ <b>БЮРО</b></span></a>
+    <nav aria-label="Основная навигация">
+      <a href="/">Заявки</a><a href="/adminvk">Админка</a><a href="/dev">Разработчик</a>
+    </nav>
+    <button type="button" id="theme" class="secondary theme" aria-label="Включить светлую тему"><span data-icon="sun"></span><span id="theme-label">Светлая</span></button>
+  </div></header>
+
+  <main id="main" class="shell" tabindex="-1">
+    <section id="workspace" hidden>
+      <div class="hero">
+        <div class="hero-copy">
+          <h1>Заявки <span>на ремонт</span></h1>
+          <p>Добавляйте заявки и меняйте их статус через чат. Реестр хранится в локальной книге Excel.</p>
+          <div class="workbook-tag"><span data-icon="file"></span> requests.xlsx</div>
+        </div>
+        <div class="hero-photo"><img src="/bench.webp" alt="Мастер ремонтирует ноутбук" width="1200" height="800"></div>
+      </div>
+
+      <div class="work-grid">
+        <section class="panel chat-panel" aria-labelledby="chat-title">
+          <div class="panel-head">
+            <h2 id="chat-title"><span class="panel-icon" data-icon="chat"></span> Чат с агентом</h2>
+            <span class="panel-note" id="chat-state" role="status"></span>
+          </div>
+          <div id="chat-feed" class="feed" role="log" aria-label="Сообщения чата" tabindex="0">
+            <article class="entry agent-entry"><span class="avatar" data-icon="chat"></span><div>
+              <strong class="speaker">Помощник мастерской</strong>
+              <p>Здравствуйте. Опишите заявку, которую нужно добавить, или укажите, какой статус найти или изменить.</p>
+            </div></article>
+          </div>
+          <div class="chat-bottom">
+            <div class="examples" aria-label="Примеры команд">
+              <button type="button" data-example="Добавь заявку от Анны Смирновой: ноутбук сильно тормозит">Добавить заявку</button>
+              <button type="button" data-example="Измени статус заявки №101 на «В работе»">Сменить статус</button>
+              <button type="button" data-example="Покажи все заявки со статусом «В работе»">Показать в работе</button>
+            </div>
+            <form id="chat-form" class="composer">
+              <label for="message" class="visually-hidden">Сообщение агенту</label>
+              <textarea id="message" rows="2" maxlength="4000" placeholder="Напишите команду…" required></textarea>
+              <button type="submit" class="primary send" id="send" aria-label="Отправить сообщение"><span data-icon="arrow"></span></button>
+            </form>
+            <div class="composer-meta"><span>Enter — отправить · Shift + Enter — новая строка</span><a id="key-link" href="/adminvk" hidden>Подключить OpenAI</a></div>
+          </div>
+        </section>
+
+        <section class="panel table-panel" aria-labelledby="table-title">
+          <div class="panel-head">
+            <h2 id="table-title"><span class="panel-icon" data-icon="table"></span> Реестр заявок</h2>
+            <button id="refresh" class="secondary" type="button"><span data-icon="refresh"></span> Обновить</button>
+          </div>
+          <div class="table-scroll" id="registry" tabindex="0" aria-label="Все заявки">
+            <table>
+              <thead><tr><th scope="col">ID</th><th scope="col">Клиент</th><th scope="col">Проблема</th><th scope="col">Статус</th></tr></thead>
+              <tbody id="rows"></tbody>
+            </table>
+            <p class="table-empty" id="table-empty" role="status">Читаю рабочую книгу…</p>
+          </div>
+          <div class="table-foot"><span id="table-count" role="status"></span><span>Лист «Заявки»</span></div>
+        </section>
+      </div>
+
+      <details class="panel journal" id="journal">
+        <summary><span><span class="panel-icon" data-icon="terminal"></span> Вызовы MCP <span id="log-count" class="counter">0</span></span><span data-icon="chevron"></span></summary>
+        <div id="logs" class="logs"><p class="muted">Здесь появятся вызовы Excel MCP.</p></div>
+      </details>
+    </section>
+
+    <section id="admin" class="settings-page" hidden>
+      <h1>Настройки мастерской</h1>
+      <p class="page-description">Подключение OpenAI для рабочего чата.</p>
+      <section class="panel settings-panel" aria-labelledby="key-title">
+        <div class="panel-head"><h2 id="key-title"><span class="panel-icon" data-icon="key"></span> Ключ OpenAI</h2><span id="key-state" class="panel-note" role="status"></span></div>
+        <form id="key-form" class="settings-form">
+          <label for="api-key">API-ключ</label>
+          <input id="api-key" name="key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false" required>
+          <p class="muted">Ключ хранится на этом компьютере в серверном файле настроек. Для замены введите новый ключ.</p>
+          <div class="settings-actions"><button class="primary" type="submit">Сохранить ключ</button><button type="button" id="clear-key" class="secondary">Убрать сохранённый ключ</button></div>
+          <p id="key-result" class="form-result" role="status"></p>
+        </form>
+      </section>
+    </section>
+
+    <section id="developer" class="settings-page" hidden>
+      <h1>Консоль разработчика</h1>
+      <p class="page-description">Модель агента и диагностика подключения к рабочей книге.</p>
+      <div class="settings-grid">
+        <section class="panel settings-panel" aria-labelledby="model-title">
+          <div class="panel-head"><h2 id="model-title"><span class="panel-icon" data-icon="chat"></span> Модель OpenAI</h2></div>
+          <form id="model-form" class="settings-form">
+            <label for="model">Идентификатор модели Responses API</label>
+            <input id="model" name="model" type="text" placeholder="gpt-6-luna" maxlength="128" autocomplete="off" spellcheck="false" required>
+            <p class="muted" id="model-source"></p>
+            <div class="settings-actions"><button class="primary" type="submit">Сохранить модель</button><button type="button" id="clear-model" class="secondary">Сбросить выбор</button></div>
+            <p id="model-result" class="form-result" role="status"></p>
+          </form>
+        </section>
+        <section class="panel settings-panel" aria-labelledby="mcp-title">
+          <div class="panel-head"><h2 id="mcp-title"><span class="panel-icon" data-icon="terminal"></span> Excel MCP</h2></div>
+          <div class="settings-form">
+            <dl class="facts"><div><dt>Версия</dt><dd id="mcp-version">2.3.2</dd></div><div><dt>Транспорт</dt><dd>stdio</dd></div><div><dt>Рабочая книга</dt><dd>data/requests.xlsx</dd></div><div><dt>Лист</dt><dd>Заявки</dd></div></dl>
+            <button class="secondary" id="diagnose" type="button"><span data-icon="refresh"></span> Проверить подключение</button>
+            <p id="diagnostic-result" class="form-result" role="status"></p>
+            <div id="diagnostic-tools"></div>
+          </div>
+        </section>
+      </div>
+    </section>
+    <noscript>Включите JavaScript, чтобы открыть рабочее пространство.</noscript>
+  </main>
+</body>
+</html>
