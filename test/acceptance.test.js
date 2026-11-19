@@ -14,6 +14,8 @@ const anna = 'Добавь заявку от Анны Смирновой: ноу
 const moveAnna = 'Измени статус заявки Анны Смирновой на «В работе»';
 const list = 'Покажи все заявки со статусом «В работе»';
 const missing = 'Измени статус заявки №999 на «Готово»';
+const lookupMissing = 'Найди заявку номер 105.';
+const lookupExisting = 'Покажи заявку №101';
 const dmitry = 'Добавь новую заявку от Дмитрия';
 const problem = 'После включения чёрный экран';
 const fixtures = new Map([
@@ -21,6 +23,8 @@ const fixtures = new Map([
   [moveAnna, ['prepare_status_change', { id: null, client: 'Анна Смирнова', status: 'В работе' }]],
   [list, ['list_requests', { status: 'В работе' }]],
   [missing, ['prepare_status_change', { id: 999, client: null, status: 'Готово' }]],
+  [lookupMissing, ['find_request', { id: 105 }]],
+  [lookupExisting, ['find_request', { id: 101 }]],
   [dmitry, ['create_request', { client: 'Дмитрий', problem: null }]],
   [problem, ['create_request', { client: 'Дмитрий', problem }]],
   ['Анна готова', ['prepare_status_change', { id: 104, client: null, status: 'Готово' }]],
@@ -36,12 +40,14 @@ let functionOutputs = 0;
 async function fakeOpenAI(_url, options) {
   const request = JSON.parse(options.body);
   const last = request.input.at(-1);
-  assert.equal(request.tools.length, 3);
+  assert.ok(request.tools.some(tool => tool.name === 'find_request'));
   assert.equal(request.store, false);
   if (last.type === 'function_call_output') {
     functionOutputs++;
+    const result = JSON.parse(last.output);
+    const text = result.kind === 'clarification' ? 'Для поиска нужен доступ к заявкам.' : result.message;
     return Response.json({
-      output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.parse(last.output).message }] }],
+      output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
     });
   }
   if (last.content === 'Проверка ошибки региона') {
@@ -168,6 +174,29 @@ test('Обязательные сценарии через HTTP и реальн�
     assert.equal((await external('read_range', { range: 'D5' })).values[0][0], 'В работе');
   });
 
+  if (!live) {
+    await t.test('Поиск по номеру читает MCP и различает отсутствие заявки и ошибку чтения', async () => {
+      const present = await send(lookupExisting);
+      assert.equal(present.kind, 'found', present.message);
+      assert.equal(present.record.id, 101);
+      assert.equal(present.operation.action, 'find_request');
+      assert.deepEqual(actions(present), ['read_range']);
+      const absent = await send(lookupMissing);
+      assert.equal(absent.kind, 'not_found', absent.message);
+      assert.equal(absent.message, 'Заявка №105 не найдена.');
+      assert.deepEqual(actions(absent), ['read_range']);
+      disconnected = true;
+      try {
+        const failed = await send(lookupExisting);
+        assert.equal(failed.kind, 'error');
+        assert.equal(failed.message, 'Excel MCP недоступен.');
+        assert.deepEqual(actions(failed), ['read_range']);
+      } finally {
+        disconnected = false;
+      }
+    });
+  }
+
   await t.test('Список, отсутствующая заявка, черновик Дмитрия', async () => {
     const found = await send(list);
     assert.equal(found.kind, 'list', found.message);
@@ -175,9 +204,11 @@ test('Обязательные сценарии через HTTP и реальн�
     assert.deepEqual(found.matches.map(row => row.id), [102, 104]);
     const absent = await send(missing);
     assert.equal(absent.kind, 'not_found', absent.message);
+    assert.equal(absent.message, 'Заявка №999 не найдена.');
     assert.deepEqual(actions(absent), ['read_range']);
     const draft = await send(dmitry);
     assert.equal(draft.kind, 'clarification', draft.message);
+    assert.equal(draft.message, 'Что нужно починить?');
     assert.equal(draft.operation.action, 'create_request');
     assert.deepEqual(actions(draft), []);
     assert.equal((await api('/api/requests')).table.length, 4);

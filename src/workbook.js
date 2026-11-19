@@ -155,5 +155,11 @@ export function createWorkbook(mcp) {
     };
   }
 
-  return { readAll, add, prepare, confirm, list };
+  async function find(ctx, id) {
+    const record = (await readAll(ctx)).find(item => item.id === id);
+    if (!record) return { kind: 'not_found', message: `Заявка №${id} не найдена.` };
+    return { kind: 'found', record, message: `Заявка №${id} · ${record.client}. Статус «${record.status}».` };
+  }
+
+  return { readAll, add, prepare, confirm, list, find };
 }

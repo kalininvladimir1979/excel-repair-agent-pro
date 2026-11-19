@@ -141,6 +141,7 @@ const actionLabels = {
   confirm_status_change: 'Смена статуса после подтверждения',
   cancel_status_change: 'Отмена смены статуса',
   list_requests: 'Поиск заявок по статусу',
+  find_request: 'Поиск заявки по номеру',
 };
 const logged = new Map();
 let logCount = 0;
@@ -317,6 +318,7 @@ function confirmationCard(container, confirmation) {
 function renderReply(result) {
   const reply = addEntry(result.message || 'Ответ приложения недоступен.', false, result.kind === 'error');
   if (result.confirmation) confirmationCard(reply, result.confirmation);
+  if (result.kind === 'found') reply.append(node('p', '', result.record.problem));
   if (result.matches?.length) {
     const list = node('ul', 'matches');
     for (const record of result.matches) {
