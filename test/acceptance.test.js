@@ -44,6 +44,9 @@ async function fakeOpenAI(_url, options) {
       output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.parse(last.output).message }] }],
     });
   }
+  if (last.content === 'Проверка ошибки региона') {
+    return Response.json({ error: { code: 'unsupported_country_region_territory' } }, { status: 403 });
+  }
   const [name, args] = fixtures.get(last.content);
   if (last.content === problem) assert.match(request.input[0].content, /Дмитрий/);
   return Response.json({
@@ -167,6 +170,13 @@ test('Обязательные сценарии через HTTP и реальн�
   });
 
   if (!live) {
+    await t.test('Ограничение OpenAI по региону видно в чате и не вызывает MCP', async () => {
+      const reply = await send('Проверка ошибки региона');
+      assert.equal(reply.kind, 'error');
+      assert.match(reply.message, /недоступен из текущего региона сети/);
+      assert.deepEqual(actions(reply), []);
+    });
+
     await t.test('Отмена, устаревший предпросмотр, формула и пустой список', async () => {
       const cancel = await send('Анна готова');
       assert.equal((await confirm(cancel, 'cancel')).kind, 'cancelled');

@@ -69,4 +69,6 @@ npm test
 REPAIR_TEST_OPENAI=1 node --env-file-if-exists=.env --test
 ```
 
+Для проверки с реальной моделью нужна сеть в регионе, где доступен OpenAI API. Если провайдер отклоняет подключение с кодом `unsupported_country_region_territory`, чат показывает причину. [Поддерживаемые регионы OpenAI API](https://help.openai.com/en/articles/7947663-chatgpt-and-openai-api-supported-countries-and-territories).
+
 Чтобы сохранить изменённую тестовую книгу для сверки в Excel или LibreOffice, задайте также `REPAIR_KEEP_TEST_BOOK=1`. Путь к книге выведет тест.

@@ -78,6 +78,12 @@ async function requestResponse(config, input, options, fetcher) {
     throw new Error('Не удалось связаться с OpenAI. Проверьте сеть и повторите команду.');
   }
   if (!response.ok) {
+    if (response.status === 403) {
+      const body = await response.json().catch(() => null);
+      if (body?.error?.code === 'unsupported_country_region_territory') {
+        throw new Error('OpenAI API недоступен из текущего региона сети. Запустите приложение там, где API поддерживается.');
+      }
+    }
     const message = {
       401: 'OpenAI отклонил ключ. Проверьте его в админке.',
       403: 'OpenAI отказал в доступе. Проверьте права ключа и доступность API.',
