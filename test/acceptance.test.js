@@ -83,7 +83,17 @@ test('Обязательные сценарии через HTTP и реальн�
 
   await copyFile(new URL('../example/requests.xlsx', import.meta.url), join(directory, 'requests.xlsx'));
   const env = { OPENAI_API_KEY: realConfig?.key, OPENAI_MODEL: realConfig?.model };
-  const { app, close } = await createApp({ directory, mcp, env, ...(live ? {} : { fetcher: fakeOpenAI }) });
+  const followUps = [];
+  const fetcher = live ? async (url, options) => {
+    const response = await fetch(url, options);
+    const input = JSON.parse(options.body).input;
+    if (input.at(-1).type === 'function_call_output') {
+      const result = await response.clone().json();
+      followUps.push({ httpStatus: response.status, responseStatus: result.status });
+    }
+    return response;
+  } : fakeOpenAI;
+  const { app, close } = await createApp({ directory, mcp, env, fetcher });
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => {
@@ -136,7 +146,9 @@ test('Обязательные сценарии через HTTP и реальн�
     assert.equal(a.record.status, 'Новый');
     assert.deepEqual(actions(a), ['read_range', 'write_range', 'read_range']);
     assert.equal(a.operation.log[1].arguments.at, 'A5');
-    assert.deepEqual((await external('read_range', { range: 'A5:D5' })).values[0], [104, 'Анна Смирнова', 'ноутбук сильно тормозит', 'Новый']);
+    const cells = (await external('read_range', { range: 'A5:D5' })).values[0];
+    assert.deepEqual(cells, [104, 'Анна Смирнова', a.record.problem, 'Новый']);
+    assert.equal(a.record.problem.toLocaleLowerCase('ru'), 'ноутбук сильно тормозит');
   });
 
   await t.test('Подтверждение привязано к сессии и пишет только D5 один раз', async () => {
@@ -167,7 +179,18 @@ test('Обязательные сценарии через HTTP и реальн�
     const end = await send(problem);
     assert.equal(end.kind, 'created', end.message);
     assert.equal(end.record.client, 'Дмитрий');
+    assert.equal(end.record.id, 105);
+    assert.equal(end.record.problem.toLocaleLowerCase('ru'), problem.toLocaleLowerCase('ru'));
   });
+
+  if (live) {
+    await t.test('Responses API принял фактические результаты всех шести вызовов функций', () => {
+      assert.equal(followUps.length, 6);
+      assert.deepEqual(followUps, Array.from({ length: 6 }, () => ({
+        httpStatus: 200, responseStatus: 'completed',
+      })));
+    });
+  }
 
   if (!live) {
     await t.test('Ограничение OpenAI по региону видно в чате и не вызывает MCP', async () => {
